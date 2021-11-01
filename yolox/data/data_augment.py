@@ -212,11 +212,16 @@ def preproc(image, input_size, mean, std, swap=(2, 0, 1)):
 
 
 class TrainTransform:
-    def __init__(self, p=0.5, rgb_means=None, std=None, max_labels=100):
+    def __init__(self, p=0.5, rgb_means=None, std=None, max_labels=100, 
+                 distort=True, mirror=True, scale_bbox_height=1.0, scale_bbox_width=1.0):
         self.means = rgb_means
         self.std = std
         self.p = p
         self.max_labels = max_labels
+        self.distort = distort
+        self.mirror = mirror
+        self.scale_bbox_height = scale_bbox_height
+        self.scale_bbox_width = scale_bbox_width
 
     def __call__(self, image, targets, input_dim):
         boxes = targets[:, :4].copy()
@@ -237,8 +242,12 @@ class TrainTransform:
         # bbox_o: [xyxy] to [c_x,c_y,w,h]
         boxes_o = xyxy2cxcywh(boxes_o)
 
-        image_t = _distort(image)
-        image_t, boxes = _mirror(image_t, boxes)
+        if self.distort:
+            image_t = _distort(image)
+        else:
+            image_t = image
+        if self.mirror:
+            image_t, boxes = _mirror(image_t, boxes)
         height, width, _ = image_t.shape
         image_t, r_ = preproc(image_t, input_dim, self.means, self.std)
         # boxes [xyxy] 2 [cx,cy,w,h]
@@ -267,6 +276,11 @@ class TrainTransform:
         ]
         padded_labels = np.ascontiguousarray(padded_labels, dtype=np.float32)
         image_t = np.ascontiguousarray(image_t, dtype=np.float32)
+        
+        # TODO: add log warning for scaling
+        padded_labels[:,3] *= self.scale_bbox_width
+        padded_labels[:,4] *= self.scale_bbox_height
+        
         return image_t, padded_labels
 
 

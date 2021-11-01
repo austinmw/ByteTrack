@@ -51,6 +51,15 @@ def make_parser():
         type=int,
         help="resume training start epoch",
     )
+    
+    parser.add_argument(
+        "-it",
+        "--max_iter",
+        default=None,
+        type=int,
+        help="iterations per epoch",
+    )
+    
     parser.add_argument(
         "--num_machines", default=1, type=int, help="num of node for training"
     )

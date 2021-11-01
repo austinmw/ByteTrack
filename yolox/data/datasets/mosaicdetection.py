@@ -2,8 +2,12 @@
 # -*- coding:utf-8 -*-
 # Copyright (c) Megvii, Inc. and its affiliates.
 
+import os
 import cv2
 import numpy as np
+import torch
+from torchvision import transforms
+from torchvision.ops import box_convert
 
 from yolox.utils import adjust_box_anns
 
@@ -40,7 +44,7 @@ class MosaicDetection(Dataset):
     def __init__(
         self, dataset, img_size, mosaic=True, preproc=None,
         degrees=10.0, translate=0.1, scale=(0.5, 1.5), mscale=(0.5, 1.5),
-        shear=2.0, perspective=0.0, enable_mixup=True, *args
+        shear=2.0, perspective=0.0, enable_mixup=True, save_image_examples=False, *args
     ):
         """
 
@@ -66,16 +70,27 @@ class MosaicDetection(Dataset):
         self.scale = scale
         self.shear = shear
         self.perspective = perspective
-        self.mixup_scale = mscale
         self.enable_mosaic = mosaic
+        self.mixup_scale = mscale        
         self.enable_mixup = enable_mixup
-
+        self.save_image_examples = save_image_examples
+        if self.preproc:
+            self.means = self.preproc.means
+            self.stds = self.preproc.std
+            self.inv_stds = [1/std for std in self.stds]
+            self.neg_means = [-mean for mean in self.means]    
+            self.inverse_transform = transforms.Compose([transforms.Normalize(mean = [ 0., 0., 0. ],
+                                                                              std = self.inv_stds),
+                                                         transforms.Normalize(mean = self.neg_means,
+                                                                              std = [ 1., 1., 1. ]),
+                                                        ])
     def __len__(self):
         return len(self._dataset)
 
+    #@Dataset.resize_getitem
     @Dataset.resize_getitem
     def __getitem__(self, idx):
-        if self.enable_mosaic:
+        if self.enable_mosaic:            
             mosaic_labels = []
             input_dim = self._dataset.input_dim
             input_h, input_w = input_dim[0], input_dim[1]
@@ -150,14 +165,83 @@ class MosaicDetection(Dataset):
             
             mix_img, padded_labels = self.preproc(mosaic_img, mosaic_labels, self.input_dim)
             img_info = (mix_img.shape[1], mix_img.shape[0])
-
-            return mix_img, padded_labels, img_info, np.array([idx])
+            
+            ret_val = mix_img, padded_labels, img_info, np.array([idx])
+            if self.save_image_examples:
+                self.save_image(idx, ret_val)                
+            return ret_val
 
         else:
             self._dataset._input_dim = self.input_dim
             img, label, img_info, id_ = self._dataset.pull_item(idx)
-            img, label = self.preproc(img, label, self.input_dim)
-            return img, label, img_info, id_
+            if self.preproc is not None:
+                img, label = self.preproc(img, label, self.input_dim)
+
+            ret_val = img, label, img_info, id_
+            if self.save_image_examples:
+                self.save_image(idx, ret_val)                
+            return ret_val            
+        
+        
+    def save_image(self, index, ret_val):
+            # Save images
+            img = ret_val[0]
+            target = ret_val[1]
+            img_info = ret_val[2]
+            # if mosaic
+            if len(img_info) == 2:
+                seq = f'mosaic_index_{index}'
+                frame = 'mosaic_multiframe'
+            else:                
+                img_id = ret_val[3]
+                seq = img_id
+                frame = img_info[2]
+
+            def draw_bboxes(img, target):
+                annotated_img = img.copy()
+                annotated_img = torch.tensor(annotated_img)
+                
+                target_copy = target.copy()
+                target_copy = torch.tensor(target_copy)                
+                
+                if self.preproc:
+                    annotated_img = self.inverse_transform(annotated_img)
+                    annotated_img *= 255
+                    annotated_img = np.array(np.moveaxis(annotated_img.cpu().numpy(), 0, -1))
+                    target_copy[:,1:5] = box_convert(target_copy[:,1:5], in_fmt='cxcywh',out_fmt='xyxy')
+                    label_idx = 0
+                    x1_idx, y1_idx, x2_idx, y2_idx = 1,2,3,4                    
+                    
+                else:
+                    annotated_img = np.array(annotated_img.cpu().numpy())
+                    label_idx = 4
+                    x1_idx, y1_idx, x2_idx, y2_idx = 0,1,2,3
+                
+                annotated_img = annotated_img.astype(np.uint8)
+                annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+
+                for n, res in enumerate(target_copy):
+                    if torch.sum(res) == 0:
+                        continue
+                    x1 = int(res[x1_idx])
+                    y1 = int(res[y1_idx])
+                    x2 = int(res[x2_idx])
+                    y2 = int(res[y2_idx])
+                    label = str(int(res[label_idx]))
+                    targetid = int(res[5])
+                    imgHeight, imgWidth, _ = annotated_img.shape
+                    thick = 1
+                    cv2.rectangle(annotated_img,(x1, y1), (x2, y2), (0,0,255), thick)
+                    cv2.putText(annotated_img, f'{label}_{targetid}', (x1, y1 - 12), 
+                                0, 1e-3 * imgHeight, (0,255,0), thick//3)
+                return annotated_img            
+            annotated_img = draw_bboxes(img, target)
+            h,w,c = annotated_img.shape
+            with_preproc= 'withPreproc' if self.preproc else 'noPreproc'
+            save_path = os.path.join('./image_samples', f'MosaicDetection_{with_preproc}_{str(int(index)).zfill(7)}_{seq}_{frame}_{str(h)}_{str(w)}.jpeg')
+            cv2.imwrite(save_path, annotated_img)
+            print(f'save_image MosaicDetection: {save_path}')
+        
 
     def mixup(self, origin_img, origin_labels, input_dim):
         jit_factor = random.uniform(*self.mixup_scale)
@@ -165,7 +249,11 @@ class MosaicDetection(Dataset):
         cp_labels = []
         while len(cp_labels) == 0:
             cp_index = random.randint(0, self.__len__() - 1)
-            cp_labels = self._dataset.load_anno(cp_index)
+            try:
+                cp_labels = self._dataset.load_anno(cp_index)
+            except:
+                print(cp_index, self._dataset.annotations.keys())
+                raise ValueError('failed load anno')     
         img, cp_labels, _, _ = self._dataset.pull_item(cp_index)
 
         if len(img.shape) == 3:

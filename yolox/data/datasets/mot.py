@@ -1,13 +1,19 @@
+from loguru import logger
+
 import cv2
+import torch
 import numpy as np
+from tqdm import tqdm
 from pycocotools.coco import COCO
 
 import os
+import random
+from PIL import Image
 
 from ..dataloading import get_yolox_datadir
 from .datasets_wrapper import Dataset
 
-
+        
 class MOTDataset(Dataset):
     """
     COCO dataset class.
@@ -18,8 +24,11 @@ class MOTDataset(Dataset):
         data_dir=None,
         json_file="train_half.json",
         name="train",
-        img_size=(608, 1088),
+        img_size=(736, 1280),
         preproc=None,
+        
+        downsample_mod=None,
+        
     ):
         """
         COCO dataset initialization. Annotation data are read into memory by COCO API.
@@ -38,9 +47,31 @@ class MOTDataset(Dataset):
 
         self.coco = COCO(os.path.join(self.data_dir, "annotations", self.json_file))
         self.ids = self.coco.getImgIds()
+        
+        # Make validation mAP faster, don't need every val image
+        if downsample_mod:
+            try:
+                downsample_mod = int(downsample_mod)
+                self.ids = self.ids[::downsample_mod]
+                logger.info(f'COCO dataset images downsampled by a factor of {downsample_mod}.')
+            except Exception as e:
+                logger.exception('Failed to downsample COCO dataset.')
+                raise e
+
         self.class_ids = sorted(self.coco.getCatIds())
         cats = self.coco.loadCats(self.coco.getCatIds())
         self._classes = tuple([c["name"] for c in cats])
+        
+        # Shift class ids to start at 0 instead of 1
+        if np.min(self.class_ids) == 1:
+            self.shift_id = -1
+            self.class_ids = [c + self.shift_id for c in self.class_ids]
+            logger.warning('Shifting COCO class IDs by -1 to begin at 0.')
+        else:
+            self.shift_id = 0
+        logger.info(f'Classes: {self._classes}')
+        logger.info(f'Class ids: {self.class_ids}')
+        
         self.annotations = self._load_coco_annotations()
         self.name = name
         self.img_size = img_size
@@ -72,10 +103,11 @@ class MOTDataset(Dataset):
 
         num_objs = len(objs)
 
-        res = np.zeros((num_objs, 6))
+        res = np.zeros((num_objs, 6))        
 
         for ix, obj in enumerate(objs):
-            cls = self.class_ids.index(obj["category_id"])
+            cls = self.class_ids.index(obj["category_id"] + self.shift_id)
+            #cls = self.class_ids.index(obj["category_id"])
             res[ix, 0:4] = obj["clean_bbox"]
             res[ix, 4] = cls
             res[ix, 5] = obj["track_id"]
@@ -99,7 +131,9 @@ class MOTDataset(Dataset):
             self.data_dir, self.name, file_name
         )
         img = cv2.imread(img_file)
-        assert img is not None
+        if img is None:
+            raise ValueError(f'img failed: {img_file}')
+        #assert img is not None
 
         return img, res.copy(), img_info, np.array([id_])
 
@@ -129,4 +163,6 @@ class MOTDataset(Dataset):
 
         if self.preproc is not None:
             img, target = self.preproc(img, target, self.input_dim)
+
+            
         return img, target, img_info, img_id

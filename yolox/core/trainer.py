@@ -9,6 +9,17 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
+
+from torchvision.utils import make_grid, draw_bounding_boxes
+# boxes = torch.tensor([[50, 50, 100, 200], [210, 150, 350, 430]], dtype=torch.float)
+# labels = ['first', 'second']
+# colors = ["blue", "yellow"]
+# result = draw_bounding_boxes(dog1_int, boxes, labels, colors=colors, width=5)
+# show(result)
+# grid = make_grid([dog1_int, dog2_int, dog1_int, dog2_int])
+# show(grid)
+# tblogger.add_image('images', grid, 0)
+
 from yolox.data import DataPrefetcher
 from yolox.utils import (
     MeterBuffer,
@@ -28,6 +39,7 @@ from yolox.utils import (
 import datetime
 import os
 import time
+import copy
 
 
 class Trainer:
@@ -46,11 +58,12 @@ class Trainer:
         self.local_rank = args.local_rank
         self.device = "cuda:{}".format(self.local_rank)
         self.use_model_ema = exp.ema
-
+        self.max_iter = args.max_iter
         # data/dataloader related attr
         self.data_type = torch.float16 if args.fp16 else torch.float32
         self.input_size = exp.input_size
         self.best_ap = 0
+        self.wrote_tb_graph = False
 
         # metric record
         self.meter = MeterBuffer(window_size=exp.print_interval)
@@ -89,15 +102,40 @@ class Trainer:
 
     def train_one_iter(self):
         iter_start_time = time.time()
-
         inps, targets = self.prefetcher.next()
-        inps = inps.to(self.data_type)
-        targets = targets.to(self.data_type)
-        targets.requires_grad = False
+
+        # On rank 0 and first iteration write graph to TensorBoard
+        if self.rank == 0 and self.exp.add_graph and not self.wrote_tb_graph:
+            try:
+                logger.info('Adding model graph to TensorBoard')
+                if isinstance(inps, list):
+                    self.tblogger.add_graph(self.graph, inps[0][[0]])
+                else:
+                    self.tblogger.add_graph(self.graph, inps[[0]])
+                self.wrote_tb_graph = True
+                del self.graph
+            except Exception as e:
+                logger.exception('Failed to add model graph to TensorBoard')
+        
+        if isinstance(inps, list):
+            inps = [i.to(self.data_type) for i in inps]
+            targets = [t.to(self.data_type) for t in targets]
+            for t in targets:
+                t.requires_grad = False
+        else:
+            inps = inps.to(self.data_type)
+            targets = targets.to(self.data_type)
+            targets.requires_grad = False
+            inps, targets = [inps], [targets]
+
         data_end_time = time.time()
 
         with torch.cuda.amp.autocast(enabled=self.amp_training):
+
+            #outputs = self.model(inps[0], targets[0])
             outputs = self.model(inps, targets)
+
+            
         loss = outputs["total_loss"]
 
         self.optimizer.zero_grad()
@@ -126,11 +164,12 @@ class Trainer:
 
         # model related init
         torch.cuda.set_device(self.local_rank)
-        model = self.exp.get_model()
+        model = self.exp.get_model()        
         logger.info(
             "Model Summary: {}".format(get_model_info(model, self.exp.test_size))
         )
         model.to(self.device)
+        self.graph = copy.deepcopy(model)
 
         # solver related init
         self.optimizer = self.exp.get_optimizer(self.args.batch_size)
@@ -147,8 +186,10 @@ class Trainer:
         )
         logger.info("init prefetcher, this might take one minute or less...")
         self.prefetcher = DataPrefetcher(self.train_loader)
+
         # max_iter means iters per epoch
-        self.max_iter = len(self.train_loader)
+        if self.max_iter is None:
+            self.max_iter = len(self.train_loader)
 
         self.lr_scheduler = self.exp.get_lr_scheduler(
             self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter
@@ -170,7 +211,7 @@ class Trainer:
             batch_size=self.args.batch_size, is_distributed=self.is_distributed
         )
         # Tensorboard logger
-        if self.rank == 0:
+        if self.rank == 0: 
             self.tblogger = SummaryWriter(self.file_name)
 
         logger.info("Training start...")

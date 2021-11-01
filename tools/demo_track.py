@@ -14,6 +14,9 @@ from yolox.tracking_utils.timer import Timer
 import argparse
 import os
 import time
+import subprocess
+import ffmpeg
+import pandas as pd
 
 IMAGE_EXT = [".jpg", ".jpeg", ".webp", ".bmp", ".png"]
 
@@ -92,7 +95,14 @@ def get_image_list(path):
             apath = os.path.join(maindir, filename)
             ext = os.path.splitext(apath)[1]
             if ext in IMAGE_EXT:
-                image_names.append(apath)
+                image_names.append(apath) 
+    try:
+        image_names = sorted(image_names, key=lambda s: s.rsplit('-')[-1].zfill(10))
+        print(1, image_names[:3])
+    except:
+        image_names = sorted(image_names)
+        print(2, image_names[:3])
+        
     return image_names
 
 
@@ -183,6 +193,7 @@ def image_demo(predictor, vis_folder, path, current_time, save_result):
     timer = Timer()
     frame_id = 0
     results = []
+    df_rows = []
     for image_name in files:
         if frame_id % 20 == 0:
             logger.info('Processing frame {} ({:.2f} fps)'.format(frame_id, 1. / max(1e-5, timer.average_time)))
@@ -192,19 +203,39 @@ def image_demo(predictor, vis_folder, path, current_time, save_result):
             online_tlwhs = []
             online_ids = []
             online_scores = []
+            online_ids2 = []            
             for t in online_targets:
                 tlwh = t.tlwh
                 tid = t.track_id
+                tc = t.class_id
                 vertical = tlwh[2] / tlwh[3] > 1.6
                 if tlwh[2] * tlwh[3] > args.min_box_area and not vertical:
                     online_tlwhs.append(tlwh)
                     online_ids.append(tid)
                     online_scores.append(t.score)
+                    online_ids2.append(tc)
             # save results
             results.append((frame_id + 1, online_tlwhs, online_ids, online_scores))
+            
+            row = {
+                #'seq': 
+                'Frame#': frame_id,
+                'y': [b[0] for b in online_tlwhs],
+                'x': [b[1] for b in online_tlwhs],
+                'width': [b[2] for b in online_tlwhs],
+                'height': [b[3] for b in online_tlwhs],
+                'id': online_ids,
+                'o2_label': online_ids2,
+                'o2_conf': online_scores,
+                '': '',
+                '': '',
+                
+            }
+            df_rows.append(row)            
+            
             timer.toc()
             online_im = plot_tracking(img_info['raw_img'], online_tlwhs, online_ids, frame_id=frame_id + 1,
-                                          fps=1. / timer.average_time)
+                                          fps=1. / timer.average_time, ids2=online_ids2)
         else:
             timer.toc()
             online_im = img_info['raw_img']
@@ -222,6 +253,23 @@ def image_demo(predictor, vis_folder, path, current_time, save_result):
         if ch == 27 or ch == ord("q") or ch == ord("Q"):
             break
     #write_results(result_filename, results)
+    
+    df = pd.DataFrame(df_rows)
+    print(df.shape)
+        
+    output_path = os.path.join(vis_folder, 'demo_tracking_video.mp4')
+    try:
+        print('Creating video...')
+        _ = (
+            ffmpeg
+            .input(f'{save_folder}/*.jpeg', pattern_type='glob', framerate=30)
+            .output(output_path)
+            .run(overwrite_output=True)
+        )
+        print('Done.')
+    except Exception as e:
+        print('FAILED ffmpeg image dir to video conversion')
+        
 
 
 def imageflow_demo(predictor, vis_folder, current_time, args):
@@ -355,3 +403,4 @@ if __name__ == "__main__":
     exp = get_exp(args.exp_file, args.name)
 
     main(exp, args)
+    

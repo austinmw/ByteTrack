@@ -72,8 +72,11 @@ def setup_logger(save_dir, distributed_rank=0, filename="log.txt", mode="a"):
     Return:
         logger instance.
     """
+    
+    
     loguru_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        f"<blue>{distributed_rank}</blue> | "
         "<level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
     )
@@ -91,6 +94,17 @@ def setup_logger(save_dir, distributed_rank=0, filename="log.txt", mode="a"):
             enqueue=True,
         )
         logger.add(save_file)
+        
+    else:
+        logger.add(
+            sys.stderr,
+            format=loguru_format,
+            level="ERROR",
+            enqueue=True,
+            #catch=True,
+        )        
+        logger.add(save_file, 
+                   level='ERROR')
 
     # redirect stdout/stderr to loguru
     redirect_sys_output("INFO")

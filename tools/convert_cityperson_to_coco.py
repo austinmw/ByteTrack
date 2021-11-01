@@ -27,6 +27,10 @@ if __name__ == '__main__':
     video_cnt = 0
     for img_path, label_path in zip(img_paths, label_paths):
         image_cnt += 1
+
+        img_path = os.path.join('datasets', img_path)
+        label_path = os.path.join('datasets', label_path)        
+        
         im = Image.open(img_path)
         image_info = {'file_name': img_path, 
                         'id': image_cnt,
