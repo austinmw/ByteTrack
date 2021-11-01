@@ -6,7 +6,7 @@ xauth list
 
 # cd ~/ByteTrack
 
-docker stop $(docker ps -aq) && docker rm $(docker ps -aq) && \
+#docker stop $(docker ps -aq) && docker rm $(docker ps -aq) || \
 docker run --gpus all -it \
 -v $PWD:/workspace/ByteTrack \
 -v /tmp/.X11-unix/:/tmp/.X11-unix:rw \
