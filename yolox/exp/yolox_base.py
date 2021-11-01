@@ -58,6 +58,9 @@ class Exp(BaseExp):
         self.test_size = (640, 640)
         self.test_conf = 0.001
         self.nmsthre = 0.65
+        
+        # -----------------  Added: austinmw ------------------ #
+        self.add_graph = False        
 
     def get_model(self):
         from yolox.models import YOLOPAFPN, YOLOX, YOLOXHead
