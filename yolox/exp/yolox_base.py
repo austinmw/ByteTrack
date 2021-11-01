@@ -60,7 +60,17 @@ class Exp(BaseExp):
         self.nmsthre = 0.65
         
         # -----------------  Added: austinmw ------------------ #
-        self.add_graph = False        
+        self.distort = True
+        self.mirror = True        
+        self.add_graph = False
+        self.debug_limit=None
+        self.save_image_examples=False
+        self.mosaic_dataset = False        
+        self.enable_mixup = False
+        self.add_graph = False     
+        self.scale_bbox_height = 1.0
+        self.scale_bbox_width = 1.0         
+        self.tsm = False
 
     def get_model(self):
         from yolox.models import YOLOPAFPN, YOLOX, YOLOXHead
