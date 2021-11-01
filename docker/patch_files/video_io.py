@@ -66,9 +66,13 @@ def read_frame(cap):
     return Image.fromarray(format_frame(frame, ColorSpace.RGB), 'RGB')
 
 
-def read_img(file):
+def read_img(file, use_opencv=True, rgb=False):
     frame = cv2.imread(file)
     if frame is None:
+        return frame
+    elif use_opencv:
+        if rgb:
+            return format_frame(frame, ColorSpace.RGB)
         return frame
     return Image.fromarray(format_frame(frame, ColorSpace.RGB), 'RGB')
 
