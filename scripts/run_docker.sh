@@ -18,3 +18,4 @@ docker run --gpus all -it \
 --privileged \
 --name byte \
 $DOCKER_IMAGE
+
