@@ -139,3 +139,11 @@ docs/api
 events.out.tfevents*
 pretrained
 YOLOX_outputs
+datasets/Cityscapes
+datasets/VisDrone
+datasets/crowdhuman
+datasets/mix_mot_ch
+datasets/mot
+datasets/MOT20
+datasets/ETHZ
+
