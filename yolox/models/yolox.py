@@ -27,12 +27,12 @@ class YOLOX(nn.Module):
 
     def forward(self, x, targets=None):
         # fpn output content features of [dark3, dark4, dark5]
-        
+
         # TODO: implement TSM
         if isinstance(x, list):
             x = x[0]
             targets = targets[0]
-        
+
         fpn_outs = self.backbone(x)
 
         if self.training:
