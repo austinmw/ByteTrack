@@ -147,3 +147,4 @@ datasets/mot
 datasets/MOT20
 datasets/ETHZ
 
+.vscode/settings.json
