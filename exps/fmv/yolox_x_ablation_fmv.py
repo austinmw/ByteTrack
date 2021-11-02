@@ -2,13 +2,9 @@
 # python3 tools/train.py -f exps/helix/FMV/yolox_x_ablation_fmv.py --devices 8 --batch-size 64 --fp16 --occupy --experiment-name fmv_exp_02_crowdhuman --ckpt pretrained/bytetrack_x_mot17.pth.tar mosaic_dataset True motion True
 
 from loguru import logger
-
 import os
-import random
 import torch
-import torch.nn as nn
 import torch.distributed as dist
-
 from yolox.exp import Exp as MyExp
 from yolox.data import get_yolox_datadir
 
@@ -17,28 +13,28 @@ class Exp(MyExp):
     def __init__(self):
         super(Exp, self).__init__()
         self.num_classes = 2
-        self.depth = 1.33 # X
-        self.width = 1.25 # X
+        self.depth = 1.33  # X
+        self.width = 1.25  # X
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
 
         self.motion = False
 
         # When motion is False, COCO for train
-        #self.train_ann = "training_coco_crowds_61_07292021_intids.json"
-        #self.train_ann = "train_08062021_81453_intids.json"
+        # self.train_ann = "training_coco_crowds_61_07292021_intids.json"
+        # self.train_ann = "train_08062021_81453_intids.json"
         # COCO for validation
         self.val_ann = "val_08302021_491_intids.json"
         self.downsample_mod = 30
-        
+
         self.input_size = (736, 1280)
         self.test_size = (736, 1280)
-        self.random_size = (20, 30) # 18,32?
+        self.random_size = (20, 30)  # 18,32?
         self.max_epoch = 20
         self.print_interval = 20
         self.eval_interval = 1
         self.test_conf = 0.1
         self.nmsthre = 0.7
-        
+
         self.no_aug_epochs = 3
         self.basic_lr_per_img = 0.001 / 64.0
 
@@ -51,15 +47,14 @@ class Exp(MyExp):
         self.scale_bbox_width = 1.0
         self.max_labels = 300
         self.max_labels_mosaic = 500
-        self.debug_limit=None
-        self.save_image_examples=False
-        self.mosaic_dataset = False        
+        self.debug_limit = None
+        self.save_image_examples = False
+        self.mosaic_dataset = False
         self.enable_mixup = False
         self.add_graph = False
-        
+
         self.min_lr_ratio = 0.05
-        
-        
+
         self.tsm = False
 
 
@@ -80,7 +75,7 @@ class Exp(MyExp):
             InfiniteSampler,
             MosaicDetection,
         )
-        
+
         if self.motion:
             logger.info('Using MotionDataset for training.')
             dataset = MotionDataset(
@@ -102,7 +97,7 @@ class Exp(MyExp):
                 debug_limit=self.debug_limit,
                 save_image_examples=self.save_image_examples,
             )
-            
+
         else:
             logger.info('Using MOTDataset for training.')
             dataset = MOTDataset(
@@ -115,7 +110,7 @@ class Exp(MyExp):
                     std=(0.229, 0.224, 0.225),
                     max_labels=self.max_labels,
                     distort=self.distort,
-                    mirror=self.mirror,                    
+                    mirror=self.mirror,
                     scale_bbox_height=self.scale_bbox_height,
                     scale_bbox_width=self.scale_bbox_width,
                 ),
@@ -132,9 +127,9 @@ class Exp(MyExp):
                     std=(0.229, 0.224, 0.225),
                     max_labels=self.max_labels_mosaic,
                     distort=self.distort,
-                    mirror=self.mirror,                    
+                    mirror=self.mirror,
                     scale_bbox_height=self.scale_bbox_height,
-                    scale_bbox_width=self.scale_bbox_width,                
+                    scale_bbox_width=self.scale_bbox_width,
                 ),
                 degrees=self.degrees,
                 translate=self.translate,
