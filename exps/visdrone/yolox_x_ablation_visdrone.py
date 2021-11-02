@@ -48,6 +48,7 @@ class Exp(MyExp):
                 std=(0.229, 0.224, 0.225),
                 max_labels=500,
             ),
+            downshift_ids=False,
         )
 
         dataset = MosaicDetection(
@@ -102,6 +103,7 @@ class Exp(MyExp):
                 rgb_means=(0.485, 0.456, 0.406),
                 std=(0.229, 0.224, 0.225),
             ),
+            downshift_ids=False,
         )
 
         if is_distributed:

@@ -28,7 +28,7 @@ class MOTDataset(Dataset):
         preproc=None,
         
         downsample_mod=None,
-        
+        downshift_ids=False,
     ):
         """
         COCO dataset initialization. Annotation data are read into memory by COCO API.
@@ -63,7 +63,7 @@ class MOTDataset(Dataset):
         self._classes = tuple([c["name"] for c in cats])
         
         # Shift class ids to start at 0 instead of 1
-        if np.min(self.class_ids) == 1:
+        if downshift_ids and np.min(self.class_ids) == 1:
             self.shift_id = -1
             self.class_ids = [c + self.shift_id for c in self.class_ids]
             logger.warning('Shifting COCO class IDs by -1 to begin at 0.')

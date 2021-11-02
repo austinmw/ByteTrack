@@ -176,6 +176,7 @@ class Exp(MyExp):
                 std=(0.229, 0.224, 0.225),
             ),
             downsample_mod=self.downsample_mod,
+            downshift_ids=True,
         )
 
         if is_distributed:
