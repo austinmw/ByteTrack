@@ -104,6 +104,13 @@ class MosaicDetection(Dataset):
 
             for i_mosaic, index in enumerate(indices):
                 img, _labels, _, _ = self._dataset.pull_item(index)
+                
+                    if isinstance(img, list):
+                        raise TypeError('Mosaic dataset is receiving list instead of image. '
+                                        'TSM setting may be mistakenly turned on '
+                                        '(not implemented with mosaic augmentation).')
+                
+                
                 h0, w0 = img.shape[:2]  # orig hw
                 scale = min(1. * input_h / h0, 1. * input_w / w0)
                 img = cv2.resize(

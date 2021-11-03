@@ -7,14 +7,15 @@ import numpy as np
 from tqdm import tqdm
 from torchvision import transforms
 from torchvision.ops import box_convert
-from pycocotools.coco import COCO
-from gluoncv.torch.data.gluoncv_motion_dataset.dataset import GluonCVMotionDataset, AnnoEntity
+from gluoncv.torch.data.gluoncv_motion_dataset.dataset import (
+    GluonCVMotionDataset,
+    AnnoEntity
+)
 
 import os
 import random
 from PIL import Image
 
-from ..dataloading import get_yolox_datadir
 from .datasets_wrapper import Dataset
 
 from yolox.utils import is_main_process
@@ -24,13 +25,14 @@ class MotionDataset(Dataset):
     """
     GluonCV Motion dataset class.
     """
+
     def __init__(self,
                  root_path=None,
                  anno_file=None,
                  split_file=None,
                  filter_fn=None,
-                 sampling_interval=5000, 
-                 clip_len=5000,
+                 sampling_interval=1000,
+                 clip_len=1000,
                  tsm=False,
                  is_train=True,
                  img_size=(736, 1280),
@@ -39,37 +41,41 @@ class MotionDataset(Dataset):
                  debug_limit=None,
                  save_image_examples=False,
                  ):
-        super().__init__(img_size)        
+        super().__init__(img_size)
+
+        dataset_name = root_path.split('datasets/')[-1].split('/motion')[0]
+        logger.info(f'Dataset name: {dataset_name}')
+
         self.tsm = tsm
-        frames_in_clip = 2 if self.tsm else 1
+        if self.tsm:
+            logger.warning('TSM is enabled!')
         
+        frames_in_clip = 2 if self.tsm else 1
+
         assert is_train is True, "This dataset clss only supports training"
         assert (2 >= frames_in_clip > 0), "frames_in_clip has to be 1 or 2"
-        
-        dataset = GluonCVMotionDataset(anno_file,
-                                       root_path=root_path,
-                                       split_file=split_file)
-        logger.info(f'GluonCVMotionDataset description: {dataset.description}')
-        
-        self.data = dict(dataset.train_samples)
+
+        self.motion_dataset = GluonCVMotionDataset(anno_file,
+                                                   root_path=root_path,
+                                                   split_file=split_file)
+        logger.info(f'GluonCVMotionDataset description: {self.motion_dataset.description}')
+
+        self.data = dict(self.motion_dataset.train_samples)
         self.debug_limit = debug_limit
         if self.debug_limit:
             self.debug_limit = int(self.debug_limit)
             logger.info(f'Debug limit: {self.debug_limit}')
             self.data = dict(random.sample(self.data.items(), self.debug_limit))
-        self.img_size = img_size       
+        self.img_size = img_size
         self.clip_len = clip_len
         self.filter_fn = filter_fn
         self.frames_in_clip = min(clip_len, frames_in_clip)
         logger.info(f'MotionDataset frames_in_clip: {self.frames_in_clip}')
         logger.info(f'MotionDataset sampling_interval: {sampling_interval}')
         logger.info(f'MotionDataset clip_len: {clip_len}')
-        
-        ## Process dataset to get all valid video clips
-        #self.clips = self.get_video_clips(sampling_interval_ms=sampling_interval)
-        
+
         # Write/get clips list
-        clips_file = f'clips_list_full_sampling_interval_{sampling_interval}.pkl'
+        clips_file = f'{dataset_name}_clips_list_full_sampling_interval_{sampling_interval}.pkl'
         if os.path.exists(clips_file):
             logger.warning(f'Loading clips from {clips_file}')
             with open(clips_file, 'rb') as f:
@@ -80,7 +86,7 @@ class MotionDataset(Dataset):
             if debug_limit is None and is_main_process():
                 with open(clips_file, 'wb') as f:
                     pickle.dump(self.clips, f)
-        
+
         self.amodal = False
         self.preproc = preproc
         self.annotations = dict()
@@ -89,38 +95,38 @@ class MotionDataset(Dataset):
             self.means = self.preproc.means
             self.stds = self.preproc.std
             self.inv_stds = [1/std for std in self.stds]
-            self.neg_means = [-mean for mean in self.means]    
+            self.neg_means = [-mean for mean in self.means]
             self.inverse_transform = transforms.Compose([transforms.Normalize(mean = [ 0., 0., 0. ],
                                                                               std = self.inv_stds),
                                                          transforms.Normalize(mean = self.neg_means,
                                                                               std = [ 1., 1., 1. ]),
                                                         ])
-    @logger.catch
+
     def pull_item(self, item_id):
         video, target = [], []
         (sample_id, clip_frame_ids) = self.clips[item_id]
-        video_info = self.data[sample_id]        
+        video_info = self.data[sample_id]
         video_reader = video_info.get_data_reader()
         # Randomly sampling self.frames_in_clip frames
-        # And keep their relative temporal order        
+        # And keep their relative temporal order
         rand_idxs = sorted(random.sample(clip_frame_ids, self.frames_in_clip))
         im_types = [type(video_reader[frame_idx][0]) for frame_idx in rand_idxs]
-        
+
         for frame_idx in rand_idxs:
             im = video_reader[frame_idx][0]
-            
+
             # Error checking
             tries = 0
             while im is None:
-                tries += 1                
+                tries += 1
                 logger.warning(f'===== item_id {item_id} im is None: resampling: tries={tries} =====')
                 frame_idx = sorted(random.sample(clip_frame_ids, self.frames_in_clip))[-1]
                 im = video_reader[frame_idx][0]
-            
+
             entities = video_info.get_entities_for_frame_num(frame_idx)
             if self.filter_fn is not None:
                 entities, _ = self.filter_fn(entities, meta_data=video_info.metadata)
-                
+
             boxes = self.entity2target(im, entities)
             video.append(im)
             target.append(boxes)
@@ -128,12 +134,12 @@ class MotionDataset(Dataset):
 #         # Video clip-level augmentation # TODO: remove?
 #         if self.transforms is not None:
 #             video, target = self.transforms(video, target)
-        
+
         video_info.clear_lazy_loaded()
-        
+
         def _process_img_boxlist(img, boxlist):
             height = img.shape[0]
-            width = img.shape[1]            
+            width = img.shape[1]
             num_boxes = boxlist.bbox.shape[0]
             num_labels = len(boxlist.get_field('labels'))
             try:
@@ -154,15 +160,18 @@ class MotionDataset(Dataset):
 
         # Standard single image detection
         if len(video) == 1:
-            img = video[0] # 1 of 1 image
+            img = video[0]  # 1 of 1 image
+
+            if not isinstance(img, np.ndarray):
+                logger.warning('img is not np.ndarray (PIL?)')
+
             # Get annotations
-            boxlist = target[0] # 1 of 1 annotations for image
+            boxlist = target[0]  # 1 of 1 annotations for image
             img, target, img_info, sample_id = _process_img_boxlist(img, boxlist)
             return img, target, img_info, sample_id
-        
+
         # Pair of images
         elif len(video) == 2:
-            outputs = []
             imgs, targets, img_infos, sample_ids = [],[],[],[]
             for i, b in zip(video, target):
                 img, target, img_info, sample_id = _process_img_boxlist(i, b)
@@ -173,7 +182,7 @@ class MotionDataset(Dataset):
             return imgs, targets, img_infos, sample_ids
 
     def load_anno(self, index):
-        if index not in self.annotations:            
+        if index not in self.annotations:
             img, target, img_id, img_info = self.pull_item(index)
             self.annotations[index] = target
         return self.annotations[index]
@@ -181,7 +190,7 @@ class MotionDataset(Dataset):
     @Dataset.resize_getitem
     def __getitem__(self, index):
         imgs, targets, img_infos, img_ids = self.pull_item(index)
-        
+
         # list of imgs, targets
         if isinstance(imgs, list):
             imgs_ret, targets_ret = [],[]
@@ -191,91 +200,90 @@ class MotionDataset(Dataset):
                 imgs_ret.append(img)
                 targets_ret.append(target)
             ret_val = imgs_ret, targets_ret, img_infos, img_ids    
-            
+
         # Single img, target pair
         else:
             img, target, img_info, img_id = imgs, targets, img_infos, img_ids
             if self.preproc is not None:
                 img, target = self.preproc(img, target, self.input_dim)
             ret_val = img, target, img_info, img_id
-        
+
             # TODO, make save_image work for multiframe
             if self.save_image_examples:
                 self.save_image(index, ret_val)
 
         return ret_val
 
-
     def save_image(self, index, ret_val):
 
-            # Save images
-            img = ret_val[0]
-            target = ret_val[1]
-            img_info = ret_val[2]
+        # Save images
+        img = ret_val[0]
+        target = ret_val[1]
+        img_info = ret_val[2]
 
-            # mosaic
-            if len(img_info) == 2:
-                seq = f'mosaic_index_{index}'
-                frame = 'mosaic_multiframe'
-            else:                
-                img_id = ret_val[3]
-                seq = img_id
-                frame = img_info[2]
+        # mosaic
+        if len(img_info) == 2:
+            seq = f'mosaic_index_{index}'
+            frame = 'mosaic_multiframe'
+        else:
+            img_id = ret_val[3]
+            seq = img_id
+            frame = img_info[2]
 
-            def draw_bboxes(img, target):
-                annotated_img = img.copy()
-                annotated_img = torch.tensor(annotated_img)
-                
-                target_copy = target.copy()
-                target_copy = torch.tensor(target_copy)                
-                
-                if self.preproc:
-                    annotated_img = self.inverse_transform(annotated_img)
-                    annotated_img *= 255
-                    annotated_img = np.array(np.moveaxis(annotated_img.cpu().numpy(), 0, -1))
-                    target_copy[:,1:5] = box_convert(target_copy[:,1:5], in_fmt='cxcywh',out_fmt='xyxy')       
-                    label_idx = 0
-                    x1_idx, y1_idx, x2_idx, y2_idx = 1,2,3,4
-                else:
-                    annotated_img = np.array(annotated_img.cpu().numpy())
-                    label_idx = 4
-                    x1_idx, y1_idx, x2_idx, y2_idx = 0,1,2,3
-                
-                annotated_img = annotated_img.astype(np.uint8)
-                annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+        def draw_bboxes(img, target):
+            annotated_img = img.copy()
+            annotated_img = torch.tensor(annotated_img)
 
-                for n, res in enumerate(target_copy):
-                    if torch.sum(res) == 0:
-                        continue
-                    x1 = int(res[x1_idx])
-                    y1 = int(res[y1_idx])
-                    x2 = int(res[x2_idx])
-                    y2 = int(res[y2_idx])
-                    label = str(int(res[label_idx]))
-                    targetid = int(res[5])
-                    imgHeight, imgWidth, _ = annotated_img.shape
-                    thick = 1
-                    cv2.rectangle(annotated_img,(x1, y1), (x2, y2), (0,0,255), thick)
-                    cv2.putText(annotated_img, f'{label}_{targetid}', (x1, y1 - 12), 
-                                0, 1e-3 * imgHeight, (0,255,0), thick//3)
-                return annotated_img            
-            annotated_img = draw_bboxes(img, target)
-            h,w,c = annotated_img.shape
-            with_preproc= 'withPreproc' if self.preproc else 'noPreproc'
-            save_path = os.path.join('./image_samples', f'MotionDataset_{with_preproc}_{str(int(index)).zfill(7)}_{seq}_{frame}_{str(h)}_{str(w)}.jpeg')
-            cv2.imwrite(save_path, annotated_img)    
-            print(f'save_image MotionDataset: {save_path}')
+            target_copy = target.copy()
+            target_copy = torch.tensor(target_copy)
+
+            if self.preproc:
+                annotated_img = self.inverse_transform(annotated_img)
+                annotated_img *= 255
+                annotated_img = np.array(np.moveaxis(annotated_img.cpu().numpy(), 0, -1))
+                target_copy[:, 1:5] = box_convert(target_copy[:, 1:5], in_fmt='cxcywh',out_fmt='xyxy')
+                label_idx = 0
+                x1_idx, y1_idx, x2_idx, y2_idx = 1, 2, 3, 4
+            else:
+                annotated_img = np.array(annotated_img.cpu().numpy())
+                label_idx = 4
+                x1_idx, y1_idx, x2_idx, y2_idx = 0, 1, 2, 3
+
+            annotated_img = annotated_img.astype(np.uint8)
+            annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+
+            for n, res in enumerate(target_copy):
+                if torch.sum(res) == 0:
+                    continue
+                x1 = int(res[x1_idx])
+                y1 = int(res[y1_idx])
+                x2 = int(res[x2_idx])
+                y2 = int(res[y2_idx])
+                label = str(int(res[label_idx]))
+                targetid = int(res[5])
+                imgHeight, imgWidth, _ = annotated_img.shape
+                thick = 1
+                cv2.rectangle(annotated_img,(x1, y1), (x2, y2), (0,0,255), thick)
+                cv2.putText(annotated_img, f'{label}_{targetid}', (x1, y1 - 12), 
+                            0, 1e-3 * imgHeight, (0,255,0), thick//3)
+            return annotated_img
+        annotated_img = draw_bboxes(img, target)
+        h,w,c = annotated_img.shape
+        with_preproc= 'withPreproc' if self.preproc else 'noPreproc'
+        save_path = os.path.join('./image_samples', f'MotionDataset_{with_preproc}_{str(int(index)).zfill(7)}_{seq}_{frame}_{str(h)}_{str(w)}.jpeg')
+        cv2.imwrite(save_path, annotated_img)
+        print(f'save_image MotionDataset: {save_path}')
 
     def __len__(self):
-        return len(self.clips)        
-        
+        return len(self.clips)
+
     def get_video_clips(self, sampling_interval_ms=1000):
         """
         Process the long videos to a small video chunk (with self.clip_len seconds)
         Video clips are generated in a temporal sliding window fashion
         """
         video_clips = []
-        weight_info = []
+        # weight_info = []
         logger.info('Getting video clips (clips per epoch)...')
         progress_bar = tqdm if is_main_process() else iter
         for (sample_id, sample) in progress_bar(self.data.items()):
@@ -287,14 +295,20 @@ class MotionDataset(Dataset):
             start_frame = min(frame_idxs_with_anno)
             end_frame = max(frame_idxs_with_anno)
             # make sure that the video clip has at least two frames
-            clip_len_in_frames = max(self.frames_in_clip, int(self.clip_len / 1000. * sample.fps))            
+            clip_len_in_frames = max(self.frames_in_clip, int(self.clip_len / 1000. * sample.fps))
             sampling_interval = int(sampling_interval_ms / 1000. * sample.fps)
-            #print(f'sampling_interval={sampling_interval}, clip_len_in_frames={clip_len_in_frames}, start_frame={start_frame}, end_frame={end_frame}, fps={sample.fps}, clip_len={self.clip_len}, sampling_interval={sampling_interval}, frame_idxs_with_anno={frame_idxs_with_anno}') 
-            for n, idx in enumerate(range(start_frame, end_frame, sampling_interval)):
-                #print(f'\tsample_id: {sample_id}, n={n}, idx={idx}, idx+clip_len_in_frames: {idx+clip_len_in_frames}')
+            # print(f'sampling_interval={sampling_interval}, clip_len_in_frames='
+            #       f'{clip_len_in_frames}, start_frame={start_frame}, '
+            #       f'end_frame={end_frame}, fps={sample.fps}, clip_len='
+            #       f'{self.clip_len}, sampling_interval={sampling_interval}, '
+            #       f'frame_idxs_with_anno={frame_idxs_with_anno}')
+            for n, idx in enumerate(range(start_frame, end_frame,
+                                          sampling_interval)):
+                # print(f'\tsample_id: {sample_id}, n={n}, idx={idx}, '
+                #       f'idx+clip_len_in_frames: {idx+clip_len_in_frames}')
                 clip_frame_ids = []
                 # only include frames with annotation within the video clip
-                for frame_idx in range(idx, idx + clip_len_in_frames):                    
+                for frame_idx in range(idx, idx + clip_len_in_frames):
                     if frame_idx in frame_idxs_with_anno:
                         clip_frame_ids.append(frame_idx)
                 # Only include video clips that have at least self.frames_in_clip annotating frames
@@ -306,10 +320,9 @@ class MotionDataset(Dataset):
 #                     })
 #                     print(f'{sample_id}, len_id_entity_dict: {len_id_entity_dict}')
                 sample.clear_lazy_loaded()
-            
-        #self.weight_info = weight_info 
-        return video_clips       
 
+        # self.weight_info = weight_info 
+        return video_clips
 
     def entity2target(self, im: Image, entities: [AnnoEntity]):
         """
@@ -320,29 +333,33 @@ class MotionDataset(Dataset):
         # we only consider person tracking for now,
         # thus all the labels are 1,
         # reserve category 0 for background during training
-        #int_labels = [1 for _ in entities]
+        # int_labels = [1 for _ in entities]
         int_labels = [list(entity.labels.values())[0] for entity in entities]
 
         boxes = torch.as_tensor(boxes).reshape(-1, 4)
-        
+
         # Check if opencv array, default to PIL
         if isinstance(im, np.ndarray):
-            size = (im.shape[1], im.shape[0]) # height, width, channels = img.shape
+            # height, width, channels = img.shape
+            size = (im.shape[1], im.shape[0])
         else:
-            size = im.size # (width, height) = im.size
+            # (width, height) = im.size
+            size = im.size
 
         boxes = BoxList(boxes, size, mode='xywh').convert('xyxy')
         if not self.amodal:
-            #boxes = boxes.clip_to_image(remove_empty=False)
+            # boxes = boxes.clip_to_image(remove_empty=False)
             boxes, keep = boxes.clip_to_image(remove_empty=True)
-        boxes.add_field('labels', torch.as_tensor(int_labels, dtype=torch.int64)[keep])
-        boxes.add_field('ids', torch.as_tensor(ids, dtype=torch.int64)[keep]) 
-        return boxes   
+        boxes.add_field('labels', torch.as_tensor(int_labels, 
+                                                  dtype=torch.int64)[keep])
+        boxes.add_field('ids', torch.as_tensor(ids, dtype=torch.int64)[keep])
+        return boxes
 
 
 # transpose
 FLIP_LEFT_RIGHT = 0
 FLIP_TOP_BOTTOM = 1
+
 
 class BoxList(object):
     """
@@ -590,4 +607,4 @@ class BoxList(object):
         s += "image_width={}, ".format(self.size[0])
         s += "image_height={}, ".format(self.size[1])
         s += "mode={})".format(self.mode)
-        return s     
+        return s

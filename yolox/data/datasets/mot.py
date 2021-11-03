@@ -47,7 +47,7 @@ class MOTDataset(Dataset):
 
         self.coco = COCO(os.path.join(self.data_dir, "annotations", self.json_file))
         self.ids = self.coco.getImgIds()
-        
+
         # Make validation mAP faster, don't need every val image
         if downsample_mod:
             try:
@@ -61,7 +61,7 @@ class MOTDataset(Dataset):
         self.class_ids = sorted(self.coco.getCatIds())
         cats = self.coco.loadCats(self.coco.getCatIds())
         self._classes = tuple([c["name"] for c in cats])
-        
+
         # Shift class ids to start at 0 instead of 1
         if downshift_ids and np.min(self.class_ids) == 1:
             self.shift_id = -1
@@ -71,7 +71,7 @@ class MOTDataset(Dataset):
             self.shift_id = 0
         logger.info(f'Classes: {self._classes}')
         logger.info(f'Class ids: {self.class_ids}')
-        
+
         self.annotations = self._load_coco_annotations()
         self.name = name
         self.img_size = img_size
