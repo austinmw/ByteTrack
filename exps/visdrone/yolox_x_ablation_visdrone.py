@@ -56,8 +56,8 @@ class Exp(MyExp):
         self.min_lr_ratio = 0.05
 
         self.tsm = False
-
-
+        self.sampling_interval = 100
+        self.clip_len = 100
 
         # Get training multiscale input sizes for logging
         size_factor = self.input_size[1] * 1.0 / self.input_size[0]
@@ -84,6 +84,8 @@ class Exp(MyExp):
                 split_file="splits.json",
                 is_train=True,
                 tsm=self.tsm,
+                sampling_interval=self.sampling_interval,
+                clip_len=self.clip_len,
                 img_size=self.input_size,
                 preproc=TrainTransform(
                     rgb_means=(0.485, 0.456, 0.406),

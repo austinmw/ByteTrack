@@ -87,6 +87,8 @@ class MotionDataset(Dataset):
                 with open(clips_file, 'wb') as f:
                     pickle.dump(self.clips, f)
 
+        logger.info(f'Number of clips per epoch: {len(self.clips)}')
+
         self.amodal = False
         self.preproc = preproc
         self.annotations = dict()
@@ -321,7 +323,7 @@ class MotionDataset(Dataset):
 #                     print(f'{sample_id}, len_id_entity_dict: {len_id_entity_dict}')
                 sample.clear_lazy_loaded()
 
-        # self.weight_info = weight_info 
+        # self.weight_info = weight_info
         return video_clips
 
     def entity2target(self, im: Image, entities: [AnnoEntity]):
