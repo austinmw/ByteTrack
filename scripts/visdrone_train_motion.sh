@@ -1,5 +1,3 @@
-
-
 python3 tools/train.py \
 -f exps/visdrone/yolox_x_ablation_visdrone.py \
 --devices 8 --batch-size 48 \
